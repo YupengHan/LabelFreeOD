@@ -45,6 +45,8 @@ tf::StampedTransform transformSensor2Robot;
 
 bool record_first_time = false;
 
+ros::Publisher ball_position;
+
 void imageCallback(const sensor_msgs::ImageConstPtr& msg) {
     ROS_INFO("Image received from Kinect - Size: %dx%d",
              msg->width, msg->height);
@@ -450,6 +452,9 @@ void bsLoc(const sensor_msgs::ImageConstPtr& msg, const sensor_msgs::ImageConstP
             marker.pose.position.y = ps2.position.y;
             marker.pose.position.z = ps2.position.z;
             marker.id = ma_projectile_vision.markers.size();
+            
+            ball_position.publish(ps2);
+            
             float cur_dist = sqrt(ps2.position.x*ps2.position.x + ps2.position.y*ps2.position.y);
             int number_of_locations = 0;
 
@@ -467,6 +472,7 @@ void bsLoc(const sensor_msgs::ImageConstPtr& msg, const sensor_msgs::ImageConstP
                 ++number_of_locations;
 
                 ma_projectile_vision.markers.push_back(marker);
+
 
                 if (ps2.position.x <= 0.75){
                     std::cout << "stopping pose detection now :  " << cur_dist << std::endl; 
@@ -543,6 +549,7 @@ void saveRGBDImage(const sensor_msgs::Image& msg) {
     
     return;
 }
+// rosrun tf static_transform_publisher 0 0.015 0 0 0 0 head_mount_kinect_ir_link camera_link 10
 
 int main (int argc, char **argv) {
     ros::init(argc, argv, "image_listener");
@@ -624,6 +631,7 @@ int main (int argc, char **argv) {
     std::cout << transform.getOrigin().getX() << " "  << transform.getOrigin().getY() << " "  << transform.getOrigin().getZ() << std::endl;
     // std::cout << transform.getRotation().getX() << " "  << transform.getRotation().getY() << " "  << transform.getRotation().getZ() << " "  << transform.getRotation().getW() << std::endl;
 
+    ball_position = nh.advertise<geometry_msgs::Pose>("ball_position_topic", 0 ); 
     vis_pub = nh.advertise<visualization_msgs::MarkerArray>( "yupeng_pt", 0 );
     // // std::cout << "439\n" << std::endl;
     // visualization_msgs::Marker marker;
