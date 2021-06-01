@@ -26,6 +26,9 @@
 #include "geometry_msgs/PoseStamped.h"
 
 #include <visualization_msgs/Marker.h>
+#include <visualization_msgs/MarkerArray.h>
+
+#include<math.h>
 
 void testmain(int size, int *c);
 void find_loc_fine(float* pts, int ptnum, int* scores, float* xyz_limits, float* device_pred_xyz);
@@ -34,11 +37,13 @@ std::vector<float> pred_pts;
 tf::StampedTransform transform;
 int ptNum = 0;
 visualization_msgs::Marker marker;
+visualization_msgs::MarkerArray ma_projectile_vision;
 
 ros::Publisher vis_pub;
 
 tf::StampedTransform transformSensor2Robot;
 
+bool record_first_time = false;
 
 void imageCallback(const sensor_msgs::ImageConstPtr& msg) {
     ROS_INFO("Image received from Kinect - Size: %dx%d",
@@ -68,6 +73,114 @@ bool compareContourAreas ( std::vector<cv::Point> contour1, std::vector<cv::Poin
 /*load xyz*/
 void load_xyz(cv::Mat d_img, int u, int v, float detect_r, float* host_ob_xyz, float* xyz_limit, int* poinNum) {
     int r;
+    if (detect_r < 7) {
+        r = round(detect_r) + 1;
+        float f = 5.453;
+        int i = 0;
+        float min_x = 3000, min_y = 3000, min_z = 7000, max_x = -3000, max_y = -3000, max_z = 0;
+        int delta = 1;
+        for (int cu = u - r; cu < u + r; cu += 1) {
+            for (int cv = v - r; cv < v + r; cv += 1) {
+                float cz = static_cast<float>(d_img.at<unsigned short>(int(cu), int(cv)));
+                if (cz > 40) min_z = cz < min_z ? cz : min_z;
+            }
+        }
+        std::cout << "min_z: " << min_z << std::endl;
+
+
+        for (int cu = u - r; cu < u + r; cu += delta) {
+            for (int cv = v - r; cv < v + r; cv += delta) {
+                float cz = static_cast<float>(d_img.at<unsigned short>(int(cu), int(cv)));
+                if (cz != 0 && (cz-min_z) < 200) {
+                    float cx = -(cz/f)*((cv - 320)*0.0093+0.063);
+                    float cy = -(cz/f)*((cu - 240)*0.0093+0.039);
+                    host_ob_xyz[3*i + 0] = cx;
+                    host_ob_xyz[3*i + 1] = cy;
+                    host_ob_xyz[3*i + 2] = cz;
+                    min_x = cx < min_x ? cx : min_x;
+                    min_y = cy < min_y ? cy : min_y;
+                    min_z = cz < min_z ? cz : min_z;
+                    max_x = cx > max_x ? cx : max_x;
+                    max_y = cy > max_y ? cy : max_y;
+                    max_z = cz > max_z ? cz : max_z;
+                    i++;
+                }
+                
+                
+            }
+        }
+        poinNum[0] = i;
+        xyz_limit[0] = min_x;
+        xyz_limit[1] = max_x;
+        xyz_limit[2] = min_y;
+        xyz_limit[3] = max_y;
+        xyz_limit[4] = min_z;
+        xyz_limit[5] = max_z;
+    }
+    else {
+        if (detect_r < 10) {
+            r = 10;
+        }
+        else if (detect_r < 20) {
+            r = 20;
+        }
+        else if (detect_r < 40) {
+            r = 40;
+        }
+        else {
+            r = 80;
+        }
+
+        float f = 5.453;
+        int i = 0;
+        float min_x = 3000, min_y = 3000, min_z = 7000, max_x = -3000, max_y = -3000, max_z = 0;
+        int delta = r/10;
+        // std::cout << "delta: " << delta << std::endl;
+        for (int cu = u - r; cu < u + r; cu += 1) {
+            for (int cv = v - r; cv < v + r; cv += 1) {
+                float cz = static_cast<float>(d_img.at<unsigned short>(int(cu), int(cv)));
+                if (cz > 40) min_z = cz < min_z ? cz : min_z;
+            }
+        }
+        // std::cout << "min_z: " << min_z << std::endl;
+
+
+        for (int cu = u - r; cu < u + r; cu += delta) {
+            for (int cv = v - r; cv < v + r; cv += delta) {
+                float cz = static_cast<float>(d_img.at<unsigned short>(int(cu), int(cv)));
+                if (cz != 0 && (cz-min_z) < 200) {
+                    float cx = -(cz/f)*((cv - 320)*0.0093+0.063);
+                    float cy = -(cz/f)*((cu - 240)*0.0093+0.039);
+                    host_ob_xyz[3*i + 0] = cx;
+                    host_ob_xyz[3*i + 1] = cy;
+                    host_ob_xyz[3*i + 2] = cz;
+                    min_x = cx < min_x ? cx : min_x;
+                    min_y = cy < min_y ? cy : min_y;
+                    min_z = cz < min_z ? cz : min_z;
+                    max_x = cx > max_x ? cx : max_x;
+                    max_y = cy > max_y ? cy : max_y;
+                    max_z = cz > max_z ? cz : max_z;
+                    i++;
+                }
+                // else {
+                //     xyz[3*i + 0] = 0;
+                //     xyz[3*i + 1] = 0;
+                //     xyz[3*i + 2] = 0;
+                // }
+                // i++;
+                
+            }
+        }
+        poinNum[0] = i;
+        xyz_limit[0] = min_x;
+        xyz_limit[1] = max_x;
+        xyz_limit[2] = min_y;
+        xyz_limit[3] = max_y;
+        xyz_limit[4] = min_z;
+        xyz_limit[5] = max_z;
+
+
+    }
     if (detect_r < 10) {
         r = 10;
     }
@@ -229,8 +342,39 @@ void bsLoc(const sensor_msgs::ImageConstPtr& msg, const sensor_msgs::ImageConstP
         v_rgb = center.y;
         
 
-        depth_u = 1.082 * u_rgb - 19.028;
-        depth_v = 1.0785 * v_rgb - 29.743;
+
+        /*
+            lt rt 
+            ld td
+        rgb
+            (387, 217) (507,217)
+
+            (192,246) (408 246)
+            (189,443) (409,447)
+
+            (175,150) (455,148)
+            (181,393) (450,395)
+        
+        
+        depth 
+            (388, 204) (517, 204)
+            
+            (174,234) (414 234)
+            (174,447) (409,450)
+
+            (156,130) (466,127)
+            (166,396) (458,396)
+        
+        */
+        // u 1.09 -33.3
+        // v 1.08266 - 31.99
+        // depth_u = 1.082 * u_rgb - 19.028;
+        // depth_v = 1.0785 * v_rgb - 29.743;
+
+        
+        //Kinect on PR2
+        depth_u = 1.09 * u_rgb - 33.3;
+        depth_v = 1.0827 * v_rgb - 31.99;
         // depth_v = 1.0785 * v_rgb - 25.743;
         
         
@@ -244,22 +388,24 @@ void bsLoc(const sensor_msgs::ImageConstPtr& msg, const sensor_msgs::ImageConstP
         
         printf("Num: %d, R: %.2f u: %.2f v: %.2f r: %.2f;    u: %.2f v: %.2f \n", pred_pts.size(), radius, u_rgb,v_rgb,radius, depth_u, depth_v);
         // std::cout << transformSensor2Robot.getRotation().getX() << " "  << transformSensor2Robot.getRotation().getY() << " "  << transformSensor2Robot.getRotation().getZ() << " "  << transformSensor2Robot.getRotation().getW() << std::endl;
+        if (radius > 4) {
+            load_xyz(in_depth_image, int(depth_v), int(depth_u), radius, host_ob_xyz, xyz_limit, poinNumPtr);
+            // printf("u: %.2f v: %.2f r: %.2f; minX: %.2f; minY: %.2f; minZ: %.2f; poinNum: %d  \n", u_rgb,v_rgb,radius,xyz_limit[0], xyz_limit[2],xyz_limit[4], poinNumPtr[0]);
+            int poinNum = poinNumPtr[0];
+            cudaMemcpy(device_ob_xyz, host_ob_xyz, poinNum *3*sizeof(float), cudaMemcpyHostToDevice);
+            int posenum = int(xyz_limit[1]-xyz_limit[0])*int(xyz_limit[3]-xyz_limit[2])*int(xyz_limit[5]-xyz_limit[4]);
 
-        load_xyz(in_depth_image, int(depth_v), int(depth_u), radius, host_ob_xyz, xyz_limit, poinNumPtr);
-        // printf("u: %.2f v: %.2f r: %.2f; minX: %.2f; minY: %.2f; minZ: %.2f; poinNum: %d  \n", u_rgb,v_rgb,radius,xyz_limit[0], xyz_limit[2],xyz_limit[4], poinNumPtr[0]);
-        int poinNum = poinNumPtr[0];
-        cudaMemcpy(device_ob_xyz, host_ob_xyz, poinNum *3*sizeof(float), cudaMemcpyHostToDevice);
-        int posenum = int(xyz_limit[1]-xyz_limit[0])*int(xyz_limit[3]-xyz_limit[2])*int(xyz_limit[5]-xyz_limit[4]);
-
-        cudaMemcpy(device_xyz_limits, xyz_limit, 6*sizeof(float), cudaMemcpyHostToDevice);
-        find_loc_fine(device_ob_xyz, poinNum, device_loc_scores, device_xyz_limits, device_pred_xyz);
-        cudaMemcpy(host_pred_xyz, device_pred_xyz, 3*sizeof(float), cudaMemcpyDeviceToHost);
+            cudaMemcpy(device_xyz_limits, xyz_limit, 6*sizeof(float), cudaMemcpyHostToDevice);
+            find_loc_fine(device_ob_xyz, poinNum, device_loc_scores, device_xyz_limits, device_pred_xyz);
+            cudaMemcpy(host_pred_xyz, device_pred_xyz, 3*sizeof(float), cudaMemcpyDeviceToHost);
+        }
+        
         // printf("x: %.2f ;  y: %.2f ;   z: %.2f \n", host_pred_xyz[0], host_pred_xyz[1], host_pred_xyz[2]);
         // */
         
 
         //under some situation
-        if (radius > 2 && host_pred_xyz[0] != -10000) {
+        if (radius > 4 && host_pred_xyz[0] != -10000) {
             pred_pts.push_back(host_pred_xyz[0]);
             pred_pts.push_back(host_pred_xyz[1]);
             pred_pts.push_back(host_pred_xyz[2]);
@@ -287,6 +433,7 @@ void bsLoc(const sensor_msgs::ImageConstPtr& msg, const sensor_msgs::ImageConstP
             ps1.orientation.y = 0;
             ps1.orientation.z = 0;
             ps1.orientation.w = 1;
+            
             tf::Pose tf_pose;
             tf::poseMsgToTF(ps1, tf_pose);
             tf_pose = transformSensor2Robot * tf_pose;
@@ -298,13 +445,43 @@ void bsLoc(const sensor_msgs::ImageConstPtr& msg, const sensor_msgs::ImageConstP
             // marker.pose.position.x = pred_pts[ptNum]/1000.0 + transform.getOrigin().getX();
             // marker.pose.position.y = pred_pts[ptNum+1]/1000.0 + transform.getOrigin().getY();
             // marker.pose.position.z = pred_pts[ptNum+2]/1000.0 + transform.getOrigin().getZ();
+            
             marker.pose.position.x = ps2.position.x;
             marker.pose.position.y = ps2.position.y;
             marker.pose.position.z = ps2.position.z;
-            std::cout << pred_pts[ptNum] << " "  << pred_pts[ptNum+1] << " "  << pred_pts[ptNum+2] << "|||||||||     " << ps2.position.x << " "  << ps2.position.y << " "  << ps2.position.z << std::endl;
+            marker.id = ma_projectile_vision.markers.size();
+            float cur_dist = sqrt(ps2.position.x*ps2.position.x + ps2.position.y*ps2.position.y);
+            int number_of_locations = 0;
+
+            bool active_projectile = true;
+            ros::Duration time_of_flight;
+            ros::Time start_time;
+
+            if (cur_dist <= 4.9 && active_projectile == true){
+                if(record_first_time == false){
+                    start_time = ros::Time::now();
+                    record_first_time = true;
+                }
+
+                std::cout << "cur_dist:   " << cur_dist << std::endl; 
+                ++number_of_locations;
+
+                ma_projectile_vision.markers.push_back(marker);
+
+                if (ps2.position.x <= 0.75){
+                    std::cout << "stopping pose detection now :  " << cur_dist << std::endl; 
+                    ros::Time end_time = ros::Time::now();
+                    time_of_flight = end_time - start_time;
+                    active_projectile = false;
+                }
+            }
+            
+            std::cout << "time of flight " << time_of_flight << std::endl;
+            std::cout << "number of locations " << number_of_locations << std::endl;
+            std::cout << ps2.position.x << " "  << ps2.position.y << " "  << ps2.position.z << std::endl;
             // std::cout << 283 << std::endl;
             ptNum = pred_pts.size();
-            vis_pub.publish(marker);
+            vis_pub.publish(ma_projectile_vision);
         }
         
 
@@ -447,20 +624,19 @@ int main (int argc, char **argv) {
     std::cout << transform.getOrigin().getX() << " "  << transform.getOrigin().getY() << " "  << transform.getOrigin().getZ() << std::endl;
     // std::cout << transform.getRotation().getX() << " "  << transform.getRotation().getY() << " "  << transform.getRotation().getZ() << " "  << transform.getRotation().getW() << std::endl;
 
-
-    vis_pub = nh.advertise<visualization_msgs::Marker>( "yupeng_pt", 0 );
+    vis_pub = nh.advertise<visualization_msgs::MarkerArray>( "yupeng_pt", 0 );
     // // std::cout << "439\n" << std::endl;
     // visualization_msgs::Marker marker;
     // marker.header.frame_id = "/camera_rgb_optical_frame";
     marker.header.frame_id = "/base_link";
     marker.header.stamp = ros::Time();
     marker.ns = "my_namespace";
-    marker.id = 0;
     marker.type = visualization_msgs::Marker::SPHERE;
     marker.action = visualization_msgs::Marker::ADD;
-    marker.pose.position.x = 1;
-    marker.pose.position.y = 1;
-    marker.pose.position.z = 1;
+    // marker.id = ma_projectile_vision.markers.size();
+    // marker.pose.position.x = 1;
+    // marker.pose.position.y = 1;
+    // marker.pose.position.z = 1;
     marker.pose.orientation.x = 0.0;
     marker.pose.orientation.y = 0.0;
     marker.pose.orientation.z = 0.0;
@@ -474,7 +650,7 @@ int main (int argc, char **argv) {
     marker.color.b = 0.0;
     //only if using a MESH_RESOURCE marker type:
     marker.mesh_resource = "package://pr2_description/meshes/base_v0/base.dae";
-    vis_pub.publish(marker);
+    // vis_pub.publish(marker);
     
     // int ptNum = 0;
     while(ros::ok()){
