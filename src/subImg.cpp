@@ -33,8 +33,14 @@
 void testmain(int size, int *c);
 void find_loc_fine(float* pts, int ptnum, int* scores, float* xyz_limits, float* device_pred_xyz);
 
+
+bool use_kinect = 1;
+
+
 std::vector<float> pred_pts;
-tf::StampedTransform transform;
+tf::StampedTransform transform_depth2Cameralink;
+tf::StampedTransform transform_Cameralink2Robot;
+
 int ptNum = 0;
 visualization_msgs::Marker marker;
 visualization_msgs::MarkerArray ma_projectile_vision;
@@ -42,6 +48,7 @@ visualization_msgs::MarkerArray ma_projectile_vision;
 ros::Publisher vis_pub;
 
 tf::StampedTransform transformSensor2Robot;
+tf::Transform UseBag_Sensor2Robot;
 
 bool record_first_time = false;
 
@@ -388,8 +395,12 @@ void bsLoc(const sensor_msgs::ImageConstPtr& msg, const sensor_msgs::ImageConstP
         depth_v = (depth_v<0) ? 0 : depth_v;
         depth_v = (depth_v>480) ? 480 : depth_v;
         
-        printf("Num: %d, R: %.2f u: %.2f v: %.2f r: %.2f;    u: %.2f v: %.2f \n", pred_pts.size(), radius, u_rgb,v_rgb,radius, depth_u, depth_v);
+        printf("Num: %d, R: %.2f u: %.2f v: %.2f r: %.2f;    u: %.2f v: %.2f \n", pred_pts.size(), radius, u_rgb, v_rgb, radius, depth_u, depth_v);
+        UseBag_Sensor2Robot = transform_Cameralink2Robot * transform_depth2Cameralink;
+        // std::cout << "---------------------------------" << std::endl;
+        // std::cout << UseBag_Sensor2Robot.getRotation().getX() << " "  << UseBag_Sensor2Robot.getRotation().getY() << " "  << UseBag_Sensor2Robot.getRotation().getZ() << " "  << UseBag_Sensor2Robot.getRotation().getW() << std::endl;
         // std::cout << transformSensor2Robot.getRotation().getX() << " "  << transformSensor2Robot.getRotation().getY() << " "  << transformSensor2Robot.getRotation().getZ() << " "  << transformSensor2Robot.getRotation().getW() << std::endl;
+        // std::cout << "---------------------------------" << std::endl;
         if (radius > 4) {
             load_xyz(in_depth_image, int(depth_v), int(depth_u), radius, host_ob_xyz, xyz_limit, poinNumPtr);
             // printf("u: %.2f v: %.2f r: %.2f; minX: %.2f; minY: %.2f; minZ: %.2f; poinNum: %d  \n", u_rgb,v_rgb,radius,xyz_limit[0], xyz_limit[2],xyz_limit[4], poinNumPtr[0]);
@@ -416,7 +427,7 @@ void bsLoc(const sensor_msgs::ImageConstPtr& msg, const sensor_msgs::ImageConstP
         if (pred_pts.size() > 30) {
             savetxt(pred_pts);
         } 
-        std::cout << transform.getOrigin().getX() << " "  << transform.getOrigin().getY() << " "  << transform.getOrigin().getZ() << std::endl;
+        // std::cout << transform.getOrigin().getX() << " "  << transform.getOrigin().getY() << " "  << transform.getOrigin().getZ() << std::endl;
         std::cout << pred_pts.size() << std::endl;
         if (pred_pts.size() > ptNum) {
             
@@ -438,7 +449,13 @@ void bsLoc(const sensor_msgs::ImageConstPtr& msg, const sensor_msgs::ImageConstP
             
             tf::Pose tf_pose;
             tf::poseMsgToTF(ps1, tf_pose);
-            tf_pose = transformSensor2Robot * tf_pose;
+            if (use_kinect) {
+                tf_pose = transformSensor2Robot * tf_pose;
+            }
+            else {
+                tf_pose =  UseBag_Sensor2Robot * tf_pose;
+            }
+            
 
             tf::poseTFToMsg(tf_pose, ps2);
 
@@ -617,18 +634,48 @@ int main (int argc, char **argv) {
     
     tf::TransformListener listener;
     // tf::StampedTransform transform;
-    listener.waitForTransform("/camera_rgb_optical_frame", "/camera_depth_optical_frame", ros::Time(0), ros::Duration(1.0));
-    std::cout << "400\n" << std::endl;
-    listener.lookupTransform("/camera_rgb_optical_frame", "/camera_depth_optical_frame", ros::Time(0), transform);
+    
+    
+    if (use_kinect) {
+        /*
+            working condition:
+                freenect on
+                PR2 connected
+        */
+        listener.waitForTransform("base_footprint", "/camera_depth_optical_frame", ros::Time(0), ros::Duration(1.0));
+        listener.lookupTransform("base_footprint", "/camera_depth_optical_frame", ros::Time(0), transformSensor2Robot);
+    }
+    else {
+        /*
+            working condition:
+                freenect off
+                PR2 connected
+        */
+        // listener.waitForTransform("/camera_link", "/camera_depth_optical_frame", ros::Time(0), ros::Duration(1.0));
+        // listener.lookupTransform("/camera_link", "/camera_depth_optical_frame", ros::Time(0), transform_depth2Cameralink);
+        transform_depth2Cameralink = tf::StampedTransform(
+                tf::Transform(tf::Quaternion(-0.5, 0.5, -0.5, 0.5), tf::Vector3(0,-0.2,0)),
+                ros::Time(0), "frame", "child_frame"
+        );
+
+
+        listener.waitForTransform("base_footprint", "/camera_link", ros::Time(0), ros::Duration(1.0));
+        listener.lookupTransform("base_footprint", "/camera_link", ros::Time(0), transform_Cameralink2Robot);
+    }
+    
+
+
+    
 
 
 
-    listener.waitForTransform("base_footprint", "/camera_depth_optical_frame", ros::Time(0), ros::Duration(1.0));
-    listener.lookupTransform("base_footprint", "/camera_depth_optical_frame", ros::Time(0), transformSensor2Robot);
+    
+    // -0.562252 0.48893 -0.437646 0.503276
+    // std::cout << transformSensor2Robot.getRotation().getX() << " "  << transformSensor2Robot.getRotation().getY() << " "  << transformSensor2Robot.getRotation().getZ() << " "  << transformSensor2Robot.getRotation().getW() << std::endl;
 
     // listener.transformPoint("/camera_rgb_optical_frame", pt1, pt2);
 
-    std::cout << transform.getOrigin().getX() << " "  << transform.getOrigin().getY() << " "  << transform.getOrigin().getZ() << std::endl;
+    // std::cout << transform.getOrigin().getX() << " "  << transform.getOrigin().getY() << " "  << transform.getOrigin().getZ() << std::endl;
     // std::cout << transform.getRotation().getX() << " "  << transform.getRotation().getY() << " "  << transform.getRotation().getZ() << " "  << transform.getRotation().getW() << std::endl;
 
     ball_position = nh.advertise<geometry_msgs::Pose>("ball_position_topic", 0 ); 
